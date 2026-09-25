@@ -1,0 +1,20 @@
+{
+  "name": "flix_pilot-project",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test:valid": "playwright test flix-validation-valid.spec.ts --reporter=html,list --trace=on"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.6.2"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.3"
+  }
+}
