@@ -43,17 +43,37 @@ export class FlixPage extends BasePage {
     this.privacyPolicyLink = page.locator("//span[@id='flix-privacy-policy']//a");
   }
 
-  async navigateToFlix(widthCall?: number): Promise<void> {
+  /**
+   * Builds a Flix URL from environment variables.
+   * Priority:
+   *   1. FLIX_URL (complete URL)
+   *   2. FLIX_BASE_URL + FLIX_MPN/DIST_ID/ISO/FLSO/EAN + widthcall
+   */
+  static buildFlixUrl(widthCall?: number): string {
+    if (process.env.FLIX_URL) {
+      const url = new URL(process.env.FLIX_URL);
+      if (widthCall !== undefined) {
+        url.searchParams.set('widthcall', String(widthCall));
+      }
+      return url.toString();
+    }
+
     const baseUrl = process.env.FLIX_BASE_URL || 'https://demo.flix360.io/performance/modularvnew/index.html';
     const mpn = process.env.FLIX_MPN || 'dummy_EAN_mascara';
     const distId = process.env.FLIX_DIST_ID || '6';
     const iso = process.env.FLIX_ISO || 'en';
     const flso = process.env.FLIX_FLSO || '987678';
     const ean = process.env.FLIX_EAN || '080';
-    // Explicit param wins (responsive tests pass their viewport width, like a real
-    // host page would); otherwise fall back to env, then 1200.
     const widthcall = widthCall !== undefined ? String(widthCall) : (process.env.FLIX_WIDTHCALL || '1200');
-    const url = `${baseUrl}?mpn=${mpn}&distId=${distId}&iso=${iso}&flso=${flso}&ean=${ean}&widthcall=${widthcall}`;
+    return `${baseUrl}?mpn=${mpn}&distId=${distId}&iso=${iso}&flso=${flso}&ean=${ean}&widthcall=${widthcall}`;
+  }
+
+  async navigateToFlix(widthCall?: number): Promise<void> {
+    const url = FlixPage.buildFlixUrl(widthCall);
+    await this.navigateToUrl(url);
+  }
+
+  async navigateToUrl(url: string): Promise<void> {
     await this.page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
     await this.loadFullPageTopToBottom();
     await this.page.waitForFunction(
@@ -62,6 +82,12 @@ export class FlixPage extends BasePage {
     );
     await this.page.evaluate(() => window.scrollTo(0, 0));
     await this.page.waitForFunction(() => window.scrollY === 0, { timeout: 5000 });
+  }
+
+  /** Scroll to the very bottom of the page. */
+  async scrollToEndOfPage(): Promise<void> {
+    await this.page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await this.page.waitForTimeout(500);
   }
 
   /**
@@ -147,6 +173,18 @@ export class FlixPage extends BasePage {
     return !(box2.x >= box1.x + box1.width || box2.x + box2.width <= box1.x);
   }
 
+  async has2DOverlap(locator1: Locator, locator2: Locator): Promise<boolean> {
+    const box1 = await locator1.boundingBox();
+    const box2 = await locator2.boundingBox();
+    if (!box1 || !box2) return false;
+    return !(
+      box2.x >= box1.x + box1.width ||
+      box2.x + box2.width <= box1.x ||
+      box2.y >= box1.y + box1.height ||
+      box2.y + box2.height <= box1.y
+    );
+  }
+
   async isElementCropped(parent: Locator, child: Locator): Promise<boolean> {
     const parentBox = await parent.boundingBox();
     const childBox = await child.boundingBox();
@@ -165,5 +203,155 @@ export class FlixPage extends BasePage {
     const box = await moduleLocator.boundingBox();
     const text = await moduleLocator.textContent();
     return (!box || box.width === 0 || box.height === 0) && (!text || text.trim().length === 0);
+  }
+
+  /** Capture a screenshot of the current viewport and return the buffer. */
+  async takeScreenshot(name: string): Promise<Buffer> {
+    return await this.page.screenshot({ path: `test-results/screenshots/${name}.png`, fullPage: false });
+  }
+
+  /** Validate cropping across all relevant modules. Returns a list of issue descriptions. */
+  async validateCropping(): Promise<string[]> {
+    const issues: string[] = [];
+
+    // ALL-IN-ONE images inside cards
+    const allInOneCardCount = await this.getElementCount(this.allInOneCards);
+    if (allInOneCardCount === 0) {
+      issues.push('ALL-IN-ONE: no cards found');
+    } else {
+      for (let i = 0; i < allInOneCardCount; i++) {
+        const card = this.allInOneCards.nth(i);
+        const image = this.allInOneImages.nth(i);
+        if (await this.isElementCropped(card, image)) {
+          issues.push(`ALL-IN-ONE card ${i + 1}: image is cropped`);
+        }
+      }
+    }
+
+    // EYES THAT THRILL text containers inside cards
+    const eyesCardCount = await this.getElementCount(this.eyesThatThrillCards);
+    if (eyesCardCount === 0) {
+      issues.push('EYES THAT THRILL: no cards found');
+    } else {
+      for (let i = 0; i < eyesCardCount; i++) {
+        const card = this.eyesThatThrillCards.nth(i);
+        const text = this.eyesThatThrillTexts.nth(i);
+        if (await this.isElementCropped(card, text)) {
+          issues.push(`EYES THAT THRILL card ${i + 1}: text container is cropped`);
+        }
+      }
+    }
+
+    // Module within viewport boundaries
+    const moduleBox = await this.getModuleBoundingBox(this.allInOneModule);
+    if (!moduleBox || moduleBox.width <= 0 || moduleBox.height <= 0 || moduleBox.x < 0) {
+      issues.push('ALL-IN-ONE module: invalid bounding box or outside viewport');
+    }
+
+    return issues;
+  }
+
+  /** Validate overlapping across all relevant modules. Returns a list of issue descriptions. */
+  async validateOverlapping(): Promise<string[]> {
+    const issues: string[] = [];
+
+    // EYES THAT THRILL cards
+    const eyesCardCount = await this.getElementCount(this.eyesThatThrillCards);
+    if (eyesCardCount < 2) {
+      issues.push(`EYES THAT THRILL: expected at least 2 cards, found ${eyesCardCount}`);
+    } else {
+      for (let i = 0; i < eyesCardCount - 1; i++) {
+        const card1 = this.eyesThatThrillCards.nth(i);
+        const card2 = this.eyesThatThrillCards.nth(i + 1);
+        if (await this.has2DOverlap(card1, card2)) {
+          issues.push(`EYES THAT THRILL cards ${i + 1} & ${i + 2}: overlap`);
+        }
+      }
+    }
+
+    // ALL-IN-ONE cards
+    const allInOneCardCount = await this.getElementCount(this.allInOneCards);
+    if (allInOneCardCount >= 2) {
+      for (let i = 0; i < allInOneCardCount - 1; i++) {
+        const card1 = this.allInOneCards.nth(i);
+        const card2 = this.allInOneCards.nth(i + 1);
+        if (await this.has2DOverlap(card1, card2)) {
+          issues.push(`ALL-IN-ONE cards ${i + 1} & ${i + 2}: overlap`);
+        }
+      }
+    }
+
+    return issues;
+  }
+
+  /** Validate broken images/modules across all relevant modules. Returns a list of issue descriptions. */
+  async validateBroken(): Promise<string[]> {
+    const issues: string[] = [];
+
+    // Video modules dimensions
+    const videoCount = await this.getElementCount(this.videoContainers);
+    if (videoCount === 0) {
+      issues.push('Video module: no video containers found');
+    } else {
+      for (let i = 0; i < videoCount; i++) {
+        const box = await this.videoContainers.nth(i).boundingBox();
+        if (!box || box.width <= 0 || box.height <= 0) {
+          issues.push(`Video module ${i + 1}: zero or missing dimensions`);
+        }
+      }
+    }
+
+    // Shade gallery images
+    const slideCount = await this.getElementCount(this.shadeGallerySlides);
+    if (slideCount === 0) {
+      issues.push('Shade gallery: no slides found');
+    } else {
+      for (let i = 0; i < slideCount; i++) {
+        const img = this.shadeGallerySlides.nth(i).locator('//img');
+        const src = await this.getCurrentImageSrc(img);
+        if (!src || src.includes('loading.gif')) {
+          issues.push(`Shade gallery slide ${i + 1}: placeholder or missing src`);
+        }
+        if (await this.isImageBroken(img)) {
+          issues.push(`Shade gallery slide ${i + 1}: broken image`);
+        }
+      }
+    }
+
+    // EYES THAT THRILL images
+    const eyesImageCount = await this.getElementCount(this.eyesThatThrillImages);
+    if (eyesImageCount === 0) {
+      issues.push('EYES THAT THRILL: no images found');
+    } else {
+      for (let i = 0; i < eyesImageCount; i++) {
+        const img = this.eyesThatThrillImages.nth(i);
+        const src = await this.getCurrentImageSrc(img);
+        if (!src || src.includes('loading.gif')) {
+          issues.push(`EYES THAT THRILL image ${i + 1}: placeholder or missing src`);
+        }
+        if (await this.isImageBroken(img)) {
+          issues.push(`EYES THAT THRILL image ${i + 1}: broken image`);
+        }
+      }
+    }
+
+    // ALL-IN-ONE images
+    const allInOneImageCount = await this.getElementCount(this.allInOneImages);
+    if (allInOneImageCount === 0) {
+      issues.push('ALL-IN-ONE: no images found');
+    } else {
+      for (let i = 0; i < allInOneImageCount; i++) {
+        const img = this.allInOneImages.nth(i);
+        const src = await this.getCurrentImageSrc(img);
+        if (!src || src.includes('loading.gif')) {
+          issues.push(`ALL-IN-ONE image ${i + 1}: placeholder or missing src`);
+        }
+        if (await this.isImageBroken(img)) {
+          issues.push(`ALL-IN-ONE image ${i + 1}: broken image`);
+        }
+      }
+    }
+
+    return issues;
   }
 }

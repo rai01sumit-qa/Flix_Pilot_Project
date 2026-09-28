@@ -346,12 +346,84 @@ So a failing "Valid" test + a passing "Invalid" test on the same element =
 ## How to View the Artifacts
 
 ```powershell
-# Interactive HTML report (screenshots + videos + traces linked per test)
-npx playwright show-report
-
-# Step-by-step replay — a screenshot/snapshot at EVERY action
-npx playwright show-trace "test-results\<test-folder>\trace.zip"
+# Open a single trace
+npx playwright show-trace <path-to-trace.zip>
 ```
+
+---
+
+## New Segregated Test Suite
+
+The valid test cases have been reorganized into three focused, independent spec
+files. Each file validates the Flix Modular Page at **three resolutions only**:
+**1200px**, **768px**, and **375px**.
+
+| Spec file | Category | What it validates |
+|---|---|---|
+| `tests/cropping.spec.ts` | Cropping | ALL-IN-ONE images inside cards, EYES THAT THRILL text inside cards, module bounding boxes |
+| `tests/overlapping.spec.ts` | Overlapping | EYES THAT THRILL card overlaps, ALL-IN-ONE card overlaps |
+| `tests/broken.spec.ts` | Broken | Video container dimensions, shade gallery images, EYES THAT THRILL images, ALL-IN-ONE images |
+
+### Run the new suite
+
+```powershell
+# Run a single category
+npm run test:cropping
+npm run test:overlapping
+npm run test:broken
+
+# Run all three categories together
+npm run test:all
+```
+
+### Pass any Flix URL
+
+The suite now accepts a complete Flix URL via the `FLIX_URL` environment variable.
+If `FLIX_URL` is not set, it falls back to building the URL from the existing `.env`
+variables (`FLIX_BASE_URL`, `FLIX_MPN`, etc.).
+
+```powershell
+# Run against a specific Flix URL
+$env:FLIX_URL="https://demo.flix360.io/performance/modularvnew/index.html?mpn=dummy_EAN_mascara"
+npm run test:all
+
+# Or run a single category against a custom URL
+$env:FLIX_URL="https://your-brand.flix360.io/..."
+npm run test:cropping
+```
+
+### Validation flow per category
+
+Every category follows the same execution pattern for each viewport:
+
+1. **Create a browser context** at the target viewport size with `recordVideo` enabled.
+2. **Navigate** to the Flix URL and wait for modules.
+3. **Scroll to the end of the page** (`scrollToEndOfPage`).
+4. **Evaluate all relevant modules** in one pass and collect every issue found.
+5. **If issues exist:**
+   - Take a screenshot per issue (`test-results/screenshots/...`)
+   - Record each issue with `expect.soft(...)` so every failure is reported
+   - Finally throw a hard assertion so the test fails
+6. **If no issues exist:**
+   - The test passes
+   - The recorded video is still saved on context close
+
+This design ensures the test **never fails on the first defect** — it verifies every
+module, captures evidence, and then reports the full list of failures.
+
+### Files added / changed for the segregated suite
+
+- `tests/cropping.spec.ts` *(new)* — cropping validation across 1200/768/375 px
+- `tests/overlapping.spec.ts` *(new)* — overlapping validation across 1200/768/375 px
+- `tests/broken.spec.ts` *(new)* — broken image/module validation across 1200/768/375 px
+- `pages/FlixPage.ts` — added:
+  - `FlixPage.buildFlixUrl(widthCall?)` — supports `FLIX_URL` env variable
+  - `navigateToUrl(url)` — navigate to any Flix URL
+  - `scrollToEndOfPage()` — explicit end-of-page scroll
+  - `validateCropping()` / `validateOverlapping()` / `validateBroken()` — collect all issues
+  - `takeScreenshot(name)` — capture evidence screenshots
+- `package.json` — added `test:cropping`, `test:overlapping`, `test:broken`, `test:all`
+- `README.md` — this section
 
 **Key point about "screenshot on each step":** Playwright's built-in `screenshot: 'on'`
 captures one screenshot per test. The **per-step screenshots live in the Trace Viewer** —

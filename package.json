@@ -4,7 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test:valid": "playwright test flix-validation-valid.spec.ts --reporter=html,list --trace=on"
+    "test:valid": "playwright test flix-validation-valid.spec.ts --reporter=html,list --trace=on",
+    "test:cropping": "playwright test cropping.spec.ts --reporter=html,list --trace=on",
+    "test:overlapping": "playwright test overlapping.spec.ts --reporter=html,list --trace=on",
+    "test:broken": "playwright test broken.spec.ts --reporter=html,list --trace=on",
+    "test:all": "playwright test cropping.spec.ts overlapping.spec.ts broken.spec.ts --reporter=html,list --trace=on"
   },
   "keywords": [],
   "author": "",
