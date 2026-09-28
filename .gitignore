@@ -26,6 +26,7 @@ npm-debug.log*
 # TypeScript build output
 *.js
 !playwright.config.js
+!scripts/serve-report.js
 *.js.map
 *.d.ts
 !node_modules/**/*.d.ts

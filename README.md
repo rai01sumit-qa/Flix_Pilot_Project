@@ -599,23 +599,117 @@ npx playwright show-trace "test-results/flix-validation-valid-Flix-008af--module
 
 ---
 
+## Updated Test Structure — `tests/ValidTests/`
+
+The validation suite has been reorganized into a dedicated `ValidTests` folder. Each
+validation category lives in its own spec and runs across three responsive viewports
+(1200px / 768px / 375px):
+
+| File | Category |
+|---|---|
+| `tests/ValidTests/01_overlapping.spec.ts` | Overlapping validation |
+| `tests/ValidTests/02_cropping.spec.ts` | Cropping validation |
+| `tests/ValidTests/03_broken.spec.ts` | Broken images/modules validation |
+
+### Why we switched to Playwright fixtures
+
+The older specs created a manual `BrowserContext` in `test.beforeAll`:
+
+```ts
+context = await browser.newContext({
+  viewport: { width, height },
+  recordVideo: { dir: '...', size: { ... } },
+});
+```
+
+This has two problems:
+
+1. **Trace and video are not attached to the HTML report.** Manually created contexts do
+   not inherit the fixture-level `trace: 'on'` / `video: 'on'` settings, so the HTML
+   report cannot show a "View Trace" button or an embedded video player for those tests.
+2. **Screenshots saved to disk are not attached.** `page.screenshot({ path: '...' })` writes
+   a file, but it does not appear under the test in the HTML report.
+
+The updated specs use Playwright's built-in fixtures:
+
+```ts
+test.use({
+  viewport: { width: viewport.width, height: viewport.height },
+});
+
+test.beforeEach(async ({ page }) => { ... });
+```
+
+Because the config already has `trace: 'on'`, `video: 'on'`, and `screenshot: 'on'`,
+Playwright now produces a `trace.zip` and `video.webm` for every test and links them
+automatically in the HTML report.
+
+### Issue-only screenshots
+
+We do **not** want a generic "test finished" screenshot in the report when the page is
+clean. We only want visual proof when a defect is detected. Each spec therefore disables
+the automatic screenshot at the file level:
+
+```ts
+test.use({ screenshot: 'off' });
+```
+
+When an issue is found, the test:
+
+1. Takes a focused screenshot of the failing module.
+2. Attaches it to the HTML report with `testInfo.attach(...)` so it appears under the
+   test result.
+3. Records a soft assertion for that issue.
+4. Fails with a final hard assertion listing all issues.
+
+This guarantees that **screenshots only appear in the report when there is a real issue**.
+
+### Report server that stops on demand
+
+`npx playwright show-report` starts a server but dies as soon as the terminal is closed.
+To avoid that without leaving a background process running forever, we added:
+
+```bash
+npm run report:serve
+```
+
+This starts the report server at `http://localhost:9323` and keeps it alive while you
+view the report. Press **Enter** in the terminal to stop the server cleanly.
+
+### Running with a custom Flix URL
+
+All specs use `FlixPage.buildFlixUrl(viewport.width)`, which respects the `FLIX_URL`
+environment variable. To run against a specific URL:
+
+```powershell
+$env:FLIX_URL = 'https://modular.flix360.io/clamps/modularvnew/RetailWidthChecks.html?mpn=41024951&ean=456&distId=6&iso=g1&flIso=v123bd';
+npm run test:valid
+```
+
+If `FLIX_URL` is not set, the builder falls back to the values in `.env`.
+
+---
+
 ## Commands Reference
 
 ```powershell
-# Run the original combined suite with full artifacts
-npx playwright test tests/flix-validation.spec.ts --reporter=html,list
+# Run the new ValidTests suite (overlapping + cropping + broken) at all viewports
+npm run test:valid
 
-# Run only the valid/positive test cases
-npx playwright test tests/flix-validation-valid.spec.ts --reporter=html,list
+# Run one category only
+npm run test:valid:overlapping
+npm run test:valid:cropping
+npm run test:valid:broken
 
-# Run only the invalid/negative (defect-detector) test cases
-npx playwright test tests/flix-validation-invalid.spec.ts --reporter=html,list
+# Run with a custom URL
+$env:FLIX_URL = 'https://your-flix-url';
+npm run test:valid
 
-# Run both split files together
-npx playwright test tests/flix-validation-valid.spec.ts tests/flix-validation-invalid.spec.ts --reporter=html,list
+# Open the report (blocking, Ctrl+C to stop)
+npm run report
 
-# Open the report
-npx playwright show-report
+# Open the report and stop it with Enter when done
+npm run report:serve
 
 # Open a single trace
 npx playwright show-trace <path-to-trace.zip>

@@ -76,10 +76,7 @@ export class FlixPage extends BasePage {
   async navigateToUrl(url: string): Promise<void> {
     await this.page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
     await this.loadFullPageTopToBottom();
-    await this.page.waitForFunction(
-      () => document.querySelectorAll("div[data-module='FM00002D'], div[data-module='FM00043A']").length >= 3,
-      { timeout: 15000 }
-    );
+    await this.waitForModules();
     await this.page.evaluate(() => window.scrollTo(0, 0));
     await this.page.waitForFunction(() => window.scrollY === 0, { timeout: 5000 });
   }
@@ -139,7 +136,16 @@ export class FlixPage extends BasePage {
 
   async waitForModules(): Promise<void> {
     await this.inpageContainer.waitFor({ state: 'visible', timeout: 60000 });
-    await this.page.waitForSelector("div[data-module='FM00002D'], div[data-module='FM00043A']", { timeout: 60000 });
+    // Generic check: the inpage container must exist and contain at least one module.
+    // Different Flix implementations use different data-module codes, so we do not
+    // hard-code specific values here.
+    await this.page.waitForFunction(
+      () => {
+        const inpage = document.querySelector("#flix-inpage");
+        return inpage instanceof HTMLElement && inpage.children.length > 0;
+      },
+      { timeout: 60000 }
+    );
   }
 
   async getModuleBoundingBox(locator: Locator) {
@@ -214,11 +220,9 @@ export class FlixPage extends BasePage {
   async validateCropping(): Promise<string[]> {
     const issues: string[] = [];
 
-    // ALL-IN-ONE images inside cards
+    // ALL-IN-ONE images inside cards (skip if module is not present on this page)
     const allInOneCardCount = await this.getElementCount(this.allInOneCards);
-    if (allInOneCardCount === 0) {
-      issues.push('ALL-IN-ONE: no cards found');
-    } else {
+    if (allInOneCardCount > 0) {
       for (let i = 0; i < allInOneCardCount; i++) {
         const card = this.allInOneCards.nth(i);
         const image = this.allInOneImages.nth(i);
@@ -226,13 +230,17 @@ export class FlixPage extends BasePage {
           issues.push(`ALL-IN-ONE card ${i + 1}: image is cropped`);
         }
       }
+
+      // Module within viewport boundaries
+      const moduleBox = await this.getModuleBoundingBox(this.allInOneModule);
+      if (!moduleBox || moduleBox.width <= 0 || moduleBox.height <= 0 || moduleBox.x < 0) {
+        issues.push('ALL-IN-ONE module: invalid bounding box or outside viewport');
+      }
     }
 
-    // EYES THAT THRILL text containers inside cards
+    // EYES THAT THRILL text containers inside cards (skip if module is not present)
     const eyesCardCount = await this.getElementCount(this.eyesThatThrillCards);
-    if (eyesCardCount === 0) {
-      issues.push('EYES THAT THRILL: no cards found');
-    } else {
+    if (eyesCardCount > 0) {
       for (let i = 0; i < eyesCardCount; i++) {
         const card = this.eyesThatThrillCards.nth(i);
         const text = this.eyesThatThrillTexts.nth(i);
@@ -242,12 +250,6 @@ export class FlixPage extends BasePage {
       }
     }
 
-    // Module within viewport boundaries
-    const moduleBox = await this.getModuleBoundingBox(this.allInOneModule);
-    if (!moduleBox || moduleBox.width <= 0 || moduleBox.height <= 0 || moduleBox.x < 0) {
-      issues.push('ALL-IN-ONE module: invalid bounding box or outside viewport');
-    }
-
     return issues;
   }
 
@@ -255,11 +257,9 @@ export class FlixPage extends BasePage {
   async validateOverlapping(): Promise<string[]> {
     const issues: string[] = [];
 
-    // EYES THAT THRILL cards
+    // EYES THAT THRILL cards (skip if module is not present on this page)
     const eyesCardCount = await this.getElementCount(this.eyesThatThrillCards);
-    if (eyesCardCount < 2) {
-      issues.push(`EYES THAT THRILL: expected at least 2 cards, found ${eyesCardCount}`);
-    } else {
+    if (eyesCardCount >= 2) {
       for (let i = 0; i < eyesCardCount - 1; i++) {
         const card1 = this.eyesThatThrillCards.nth(i);
         const card2 = this.eyesThatThrillCards.nth(i + 1);
@@ -269,7 +269,7 @@ export class FlixPage extends BasePage {
       }
     }
 
-    // ALL-IN-ONE cards
+    // ALL-IN-ONE cards (skip if module is not present on this page)
     const allInOneCardCount = await this.getElementCount(this.allInOneCards);
     if (allInOneCardCount >= 2) {
       for (let i = 0; i < allInOneCardCount - 1; i++) {
@@ -288,11 +288,9 @@ export class FlixPage extends BasePage {
   async validateBroken(): Promise<string[]> {
     const issues: string[] = [];
 
-    // Video modules dimensions
+    // Video modules dimensions (skip if module is not present on this page)
     const videoCount = await this.getElementCount(this.videoContainers);
-    if (videoCount === 0) {
-      issues.push('Video module: no video containers found');
-    } else {
+    if (videoCount > 0) {
       for (let i = 0; i < videoCount; i++) {
         const box = await this.videoContainers.nth(i).boundingBox();
         if (!box || box.width <= 0 || box.height <= 0) {
@@ -301,11 +299,9 @@ export class FlixPage extends BasePage {
       }
     }
 
-    // Shade gallery images
+    // Shade gallery images (skip if module is not present)
     const slideCount = await this.getElementCount(this.shadeGallerySlides);
-    if (slideCount === 0) {
-      issues.push('Shade gallery: no slides found');
-    } else {
+    if (slideCount > 0) {
       for (let i = 0; i < slideCount; i++) {
         const img = this.shadeGallerySlides.nth(i).locator('//img');
         const src = await this.getCurrentImageSrc(img);
@@ -318,11 +314,9 @@ export class FlixPage extends BasePage {
       }
     }
 
-    // EYES THAT THRILL images
+    // EYES THAT THRILL images (skip if module is not present)
     const eyesImageCount = await this.getElementCount(this.eyesThatThrillImages);
-    if (eyesImageCount === 0) {
-      issues.push('EYES THAT THRILL: no images found');
-    } else {
+    if (eyesImageCount > 0) {
       for (let i = 0; i < eyesImageCount; i++) {
         const img = this.eyesThatThrillImages.nth(i);
         const src = await this.getCurrentImageSrc(img);
@@ -335,11 +329,9 @@ export class FlixPage extends BasePage {
       }
     }
 
-    // ALL-IN-ONE images
+    // ALL-IN-ONE images (skip if module is not present)
     const allInOneImageCount = await this.getElementCount(this.allInOneImages);
-    if (allInOneImageCount === 0) {
-      issues.push('ALL-IN-ONE: no images found');
-    } else {
+    if (allInOneImageCount > 0) {
       for (let i = 0; i < allInOneImageCount; i++) {
         const img = this.allInOneImages.nth(i);
         const src = await this.getCurrentImageSrc(img);

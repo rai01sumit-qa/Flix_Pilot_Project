@@ -4,11 +4,13 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test:valid": "playwright test flix-validation-valid.spec.ts --reporter=html,list --trace=on",
-    "test:cropping": "playwright test cropping.spec.ts --reporter=html,list --trace=on",
-    "test:overlapping": "playwright test overlapping.spec.ts --reporter=html,list --trace=on",
-    "test:broken": "playwright test broken.spec.ts --reporter=html,list --trace=on",
-    "test:all": "playwright test cropping.spec.ts overlapping.spec.ts broken.spec.ts --reporter=html,list --trace=on"
+    "test:valid": "playwright test tests/ValidTests --reporter=html,list --trace=on",
+    "test:valid:overlapping": "playwright test tests/ValidTests/01_overlapping.spec.ts --reporter=html,list --trace=on",
+    "test:valid:cropping": "playwright test tests/ValidTests/02_cropping.spec.ts --reporter=html,list --trace=on",
+    "test:valid:broken": "playwright test tests/ValidTests/03_broken.spec.ts --reporter=html,list --trace=on",
+    "test:all": "playwright test tests/ValidTests --reporter=html,list --trace=on",
+    "report": "playwright show-report",
+    "report:serve": "node scripts/serve-report.js"
   },
   "keywords": [],
   "author": "",
